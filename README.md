@@ -1,58 +1,33 @@
-# 🥝 Kiwi Browser - Custom Build
+# [Your Browser Name]
 
-[![Indonesian](https://img.shields.io/badge/Language-Indonesian-blue?style=for-the-badge)](#-bahasa-indonesia)
-[![English](https://img.shields.io/badge/Language-English-red?style=for-the-badge)](#-english)
+Welcome to the official repository for **[Your Browser Name]**, a fast, lightweight, and feature-rich web browser for Android. This project is a customized fork of the open-source Kiwi Browser.
 
----
-
-## 🇮🇩 Bahasa Indonesia
-
-![build apk](https://img.shields.io/badge/build-optimized-brightgreen)
-![platform](https://img.shields.io/badge/platform-Android_arm64--v8a-orange)
-
-Selamat datang! Repositori ini adalah hasil modifikasi dan otomatisasi alur kerja (*workflow*) untuk membangun **Kiwi Browser** secara mandiri menggunakan GitHub Actions. Proyek ini difokuskan pada stabilitas build untuk arsitektur modern 64-bit.
-
-### 🛠️ Informasi Proyek (Arsip Publik)
-Repositori ini bersifat **Public Archive**. Silakan gunakan repositori ini sebagai referensi atau fondasi untuk proyek kamu sendiri:
-* **Bebas Dikembangkan:** Kamu sangat dipersilakan untuk melakukan *Fork*, memodifikasi tampilan (*UI/UX*), menambahkan fitur, atau mengoptimalkan kode lebih lanjut.
-* **Terbuka untuk Semua:** Jika kamu berhasil meningkatkan kecepatan build atau memperbaiki bug pada script `.yml`, jangan ragu untuk berbagi melalui *Pull Request*.
-* **Status:** Build ini disediakan "apa adanya" (*as-is*) untuk tujuan edukasi dan pengembangan hobi.
-
-### 🎖️ Kredit
-Proyek ini tidak akan mungkin ada tanpa kerja keras dari para pengembang berikut:
-* **[Kiwi Browser Team (Geometry OU)](https://github.com/kiwibrowser/src.next):** Sebagai pengembang utama.
-* **[The Chromium Project](https://www.chromium.org/):** Fondasi utama browser modern.
-* **GitHub Actions:** Penyedia infrastruktur build cloud.
+Our goal is to stabilize the base build first, after which we plan to introduce unique features, UI enhancements, and a complete rebranding.
 
 ---
 
-## 🇺🇸 English
-
-![build apk](https://img.shields.io/badge/build-optimized-brightgreen)
-![platform](https://img.shields.io/badge/platform-Android_arm64--v8a-orange)
-
-Welcome! This repository is a modified workflow to build **Kiwi Browser** independently using GitHub Actions. This project focuses on build stability for modern 64-bit architectures.
-
-### 🛠️ Project Information (Public Archive)
-This repository is a **Public Archive**. Feel free to use this repository as a reference or foundation for your own projects:
-* **Open for Development:** You are highly encouraged to *Fork*, modify the *UI/UX*, add features, or further optimize the code.
-* **Open for All:** If you successfully improve build speed or fix bugs in the `.yml` scripts, feel free to share via *Pull Request*.
-* **Status:** Build is provided "as-is" for educational and hobbyist purposes.
-
-### 🎖️ Credits
-This project would not be possible without the hard work of these developers:
-* **[Kiwi Browser Team (Geometry OU)](https://github.com/kiwibrowser/src.next):** As the lead developers.
-* **[The Chromium Project](https://www.chromium.org/):** The core foundation of modern browsers.
-* **GitHub Actions:** Provider of the amazing cloud build infrastructure.
+## 🚀 Future Roadmap & Features
+Once the core build environment is fully stable, we plan to implement the following:
+* [ ] Full rebranding (new name, logo, and custom UI themes).
+* [ ] Enhanced built-in privacy tools and ad-blocking capabilities.
+* [ ] Performance optimizations for faster page loading on budget devices.
+* [ ] Custom quality-of-life extensions pre-integrated out of the box.
 
 ---
 
-## 🚀 How to Build / Cara Build
-1. **Fork** this repository / *Fork repositori ini*.
-2. Go to the **Actions** tab / *Buka tab Actions*.
-3. Select **build apk** workflow / *Pilih workflow build apk*.
-4. Click **Run workflow** / *Klik tombol Run workflow*.
-5. Download the APK from **Releases** or **Artifacts** / *Unduh APK dari bagian Releases atau Artifacts*.
+## 🛠️ Build Guide
 
----
-*Dibuat dengan ❤️ untuk komunitas open-source / Made with ❤️ for the open-source community.*
+Since this project is based on the Kiwi Browser (Chromium upstream), compiling it requires a dedicated Linux environment. 
+
+### Prerequisites
+* **OS:** Ubuntu 22.04 LTS (highly recommended based on our recent environment updates).
+* **Storage:** At least 100 GB – 150 GB of free disk space (SSD preferred).
+* **Hardware:** Minimum 16 GB RAM (32 GB is ideal to prevent the linker from crashing).
+
+### Getting Started
+*(Note: Make sure your local Android NDK and SDK paths are properly configured before running the build scripts).*
+
+1. **Clone the repository:**
+   ```bash
+   git clone [https://github.com/Fluffy-alt/Build.git](https://github.com/Fluffy-alt/Build.git)
+   cd Build
