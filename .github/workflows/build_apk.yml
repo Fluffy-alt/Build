@@ -1,172 +1,421 @@
-# Build APKs for Kiwi Browser (Fork Optimized - 64bit Only - The Last Fix)
+# Build APKs for Kiwi Browser
 name: build apk
 
 on:
   workflow_dispatch:
     inputs:
       prepareRelease:
-        description: 'Create a draft release in Google Play Store'     
+        description: 'Create a draft release in Google Play Store'
         required: true
         default: 'no'
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
+
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
-        platform: [arm64]
+        platform: [arm, arm64, x86, x64]
+
+    # /dev/disk/azure/root-part1  → / (slow HDD)
+    # /dev/disk/azure/resource-part1 → /mnt (14 GB ephemeral SSD)
+    # Source code lives on HDD; cache, deps, output live on SSD.
 
     steps:
       - name: Initializing build
         run: echo Initializing build for platform ${{ matrix.platform }}
 
-      - name: Reclaiming disk space
+      - name: Reclaiming disk space — disabling swap
         run: |
           sudo swapoff -av
           sudo rm -f /swapfile
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /imagegeneration
-          sudo apt-get clean
 
-      - name: Checking-out source-code
+      - name: Reclaiming disk space — removing .NET and unused packages
+        run: sudo rm -rf /usr/share/dotnet /imagegeneration
+
+      - name: Checking-out source code in $GITHUB_WORKSPACE
         uses: actions/checkout@v4
 
-      - name: Creating secondary disk folder (SSD)
+      - name: Creating secondary disk folder on SSD (/mnt)
         run: |
           sudo mkdir -p /extended_data
           sudo chown -R runner:docker /extended_data
+
+      - name: Creating symlink from $GITHUB_WORKSPACE to SSD
+        run: |
           sudo ln -s /extended_data /mnt/secondary_disk
           sudo ln -s /mnt/secondary_disk $GITHUB_WORKSPACE/
 
-      - name: Checking-out CIPD dependencies
+      - name: Checking-out CIPD dependencies into /mnt/secondary_disk/.cipd
         uses: actions/checkout@v4
         with:
           repository: kiwibrowser/dependencies
-          path: ./secondary_disk/.cipd 
+          path: ./secondary_disk/.cipd
 
-      - name: Setup gclient environment & src symlink
+      - name: Linking .cipd and copying .gclient files
         run: |
-          ln -sf $GITHUB_WORKSPACE/secondary_disk/.cipd $GITHUB_WORKSPACE/../.cipd
-          cp $GITHUB_WORKSPACE/../.cipd/.gclient $GITHUB_WORKSPACE/../.gclient
-          cp $GITHUB_WORKSPACE/../.cipd/.gclient_entries $GITHUB_WORKSPACE/../.gclient_entries
-          ln -sf $GITHUB_WORKSPACE $GITHUB_WORKSPACE/../src
-          
-          cd ..
-          python3 -c "
-          import os
-          repo = os.path.basename(os.environ['GITHUB_WORKSPACE'])
-          for file in ['.gclient', '.gclient_entries']:
-              with open(file, 'r') as f: t = f.read()
-              t = t.replace('\"src\"', '\"' + repo + '\"').replace(\"'src'\", \"'\" + repo + \"'\")
-              t = t.replace('\"src/', '\"' + repo + '/').replace(\"'src/\", \"'\" + repo + \"/\")
-              with open(file, 'w') as f: f.write(t)
-          "
+          ln -s $GITHUB_WORKSPACE/./secondary_disk/.cipd ..
+          cp ../.cipd/.gclient ..
+          cp ../.cipd/.gclient_entries ..
 
-      - name: Installing Python packages & OpenJDK
+      - name: Installing rclone
+        run: curl https://rclone.org/install.sh | sudo bash
+
+      - name: Updating APT repository
+        run: sudo apt-get update
+
+      # python-is-python3 ensures `python` resolves to python3 on Ubuntu 20.04+
+      - name: Installing Python 3 and OpenJDK 11
         run: |
-          sudo add-apt-repository ppa:deadsnakes/ppa -y
-          sudo apt-get update
-          sudo apt-get install -y python3.11 python3.11-distutils python3.11-venv python2 openjdk-8-jdk-headless libncurses5 ccache ninja-build
-          sudo apt-get remove -y python-is-python3
+          sudo apt-get install -y \
+            python3 python-is-python3 \
+            openjdk-11-jdk-headless \
+            libncurses5 ccache ninja-build
 
-      - name: Installing system dependencies
+      - name: Installing Chromium build dependencies
         run: |
           sudo bash install-build-deps.sh --no-chromeos-fonts
-          python2 build/linux/sysroot_scripts/install-sysroot.py --arch=i386
-          python2 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+          build/linux/sysroot_scripts/install-sysroot.py --arch=i386
+          build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
 
-      - name: Configuring Python (Phase 1)
+      - name: Creating output folder
+        run: mkdir -p secondary_disk/out/android_${{ matrix.platform }}
+
+      - name: Generating one-time APK signature key
         run: |
-          sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-          sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
+          keytool -genkey -v \
+            -keystore keystore.jks \
+            -alias dev \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass public_password \
+            -keypass public_password \
+            -dname "cn=Kiwi Browser (unverified), ou=Actions, o=Kiwi Browser, c=GitHub"
 
-      # [PERBAIKAN TOTAL VPYTHON]
-      - name: Downloading depot_tools and Hard-patching vpython to /usr/bin
+      - name: Copying args.gn to target folder
+        run: |
+          cat .build/android_arm/args.gn \
+            | sed "s#target_cpu = \"arm\"#target_cpu = \"${{ matrix.platform }}\"#" \
+            | sed "s#android_default_version_name = \"Git\"#android_default_version_name = \"Git$(date '+%y%m%d')Gen${{ github.run_id }}\"#" \
+            > secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn version code (arm)
+        if: matrix.platform == 'arm'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')1\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn version code (arm64)
+        if: matrix.platform == 'arm64'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')2\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn version code (x86)
+        if: matrix.platform == 'x86'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')3\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn version code (x64)
+        if: matrix.platform == 'x64'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')4\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Displaying args.gn
+        run: cat secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Downloading depot_tools
         working-directory: ./secondary_disk
-        run: |
-          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          
-          # Buat script filter di lokasi sementara
-          cat << 'EOF' > /tmp/vpython_stub
-          #!/bin/bash
-          args=()
-          skip=0
-          for arg in "$@"; do
-            if [ $skip -eq 1 ]; then skip=0; continue; fi
-            if [[ "$arg" == -vpython* ]]; then
-              if [[ "$arg" != *"="* ]]; then skip=1; fi
-              continue
-            fi
-            args+=("$arg")
-          done
-          if [[ "$0" == *"vpython3"* ]]; then
-            exec /usr/bin/python3.11 "${args[@]}"
-          else
-            exec /usr/bin/python2 "${args[@]}"
-          fi
-          EOF
-          
-          chmod +x /tmp/vpython_stub
-          # Pasang langsung ke /usr/bin agar sistem tidak bisa berkelit
-          sudo cp /tmp/vpython_stub /usr/bin/vpython
-          sudo cp /tmp/vpython_stub /usr/bin/vpython3
-          # Copy juga ke depot_tools untuk jaga-jaga
-          cp /tmp/vpython_stub depot_tools/vpython
-          cp /tmp/vpython_stub depot_tools/vpython3
+        run: git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
 
-      - name: Adding depot_tools to path
+      # Fix: replaced deprecated ::add-path:: with $GITHUB_PATH
+      - name: Adding depot_tools to PATH
         run: echo "$GITHUB_WORKSPACE/secondary_disk/depot_tools" >> $GITHUB_PATH
 
-      - name: Bypass missing Traffic Annotation tools
-        run: rm -f $GITHUB_WORKSPACE/../src/tools/traffic_annotation/bin/linux64/*.sha1 || true
+      # Fix: replaced deprecated ::set-env:: with $GITHUB_ENV
+      - name: Setting compiler environment variables
+        run: |
+          echo "CC=ccache clang -Qunused-arguments" >> $GITHUB_ENV
+          echo "CXX=ccache clang++ -Qunused-arguments" >> $GITHUB_ENV
+
+      - name: Checking available disk space
+        run: df -h
+
+      - name: Creating rclone config (download cache)
+        run: |
+          mkdir -p $HOME/.config/rclone/
+          cat > $HOME/.config/rclone/rclone.conf << EOF
+          [cache]
+          type = sftp
+          host = ${{ secrets.STORAGE_HOST }}
+          user = storage
+          key_pem = ${{ secrets.STORAGE_KEY }}
+          EOF
+
+      - name: Creating cache folder on SSD
+        run: |
+          sudo mkdir -p /mnt/cache
+          sudo chown -R runner:docker /mnt/cache
+
+      - name: Symlinking $HOME/cache → SSD cache
+        run: ln -s /mnt/cache $HOME/
+
+      - name: Downloading ccache from remote storage
+        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-ccache-${{ matrix.platform }} $HOME/cache
+
+      - name: Checking available disk space after cache download
+        run: df -h
+
+      # Fix: omahaproxy.appspot.com is shut down; use chromiumdash instead
+      - name: Fetching latest stable Chromium version number
+        run: |
+          curl -s "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Android&num=1" \
+            | python3 -c "
+          import sys, json
+          v = json.load(sys.stdin)[0]['version'].split('.')
+          print('MAJOR=' + v[0])
+          print('MINOR=' + v[1])
+          print('BUILD=' + v[2])
+          print('PATCH=' + v[3])
+          " > chrome/VERSION
+
+      - name: Calculating cache size
+        run: du -csh $HOME/cache
+
+      - name: Creating ccache configuration
+        run: |
+          mkdir -p $HOME/.ccache/
+          cat >> $HOME/.ccache/ccache.conf << EOF
+          compiler_check = none
+          stats = false
+          max_size = 20G
+          base_dir = $HOME
+          cache_dir = $HOME/cache
+          hash_dir = false
+          EOF
 
       - name: Running gclient runhooks
         run: gclient runhooks
 
-      - name: Switch Python to version 3.11 for Compilation
-        run: |
-          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.11 2
-          sudo update-alternatives --set python /usr/bin/python3.11
-          rm -rf $HOME/.vpython-root
+      - name: Generating build files with gn
+        run: gn gen ./secondary_disk/out/android_${{ matrix.platform }}
 
-      - name: Creating signature & args.gn
-        run: |
-          keytool -genkey -v -keystore keystore.jks -alias dev -keyalg RSA -keysize 2048 -validity 10000 -storepass public_password -keypass public_password -dname "cn=Kiwi Browser, ou=Actions, o=Kiwi, c=GitHub"
-          mkdir -p secondary_disk/out/android_${{ matrix.platform }}
-          cat .build/android_arm/args.gn | sed "s#target_cpu = \"arm\"#target_cpu = \"${{ matrix.platform }}\"#" | sed "s#android_default_version_name = \"Git\"#android_default_version_name = \"Git$(date '+%y%m%d')Gen${{ github.run_id }}\"#" > secondary_disk/out/android_${{ matrix.platform }}/args.gn
-          sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')2\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+      - name: Checking available disk space before build
+        run: df -h
 
-      - name: Generating build files (GN GEN)
+      - name: Creating rclone config (upload cache)
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
         run: |
-          export VPYTHON_BYPASS="manually managed python not supported by chrome operations"
-          gn gen ./secondary_disk/out/android_${{ matrix.platform }}
+          cat > $HOME/.config/rclone/rclone.conf << EOF
+          [sync]
+          type = sftp
+          host = ${{ secrets.STORAGE_HOST }}
+          user = storage
+          key_pem = ${{ secrets.STORAGE_KEY }}
+          EOF
 
-      - name: Compiling source-code (NINJA)
+      # ── Incremental compilation (snapshot cache after each stage) ────────────
+
+      - name: Compiling (base)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} base
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (content/public/common)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} content/public/common
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (content/public/browser)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} content/public/browser
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (components/guest_view/common)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} components/guest_view/common
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (components/guest_view/renderer)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} components/guest_view/renderer
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (chrome/gpu)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome/gpu
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (chrome_java)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome_java
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (components/version_info)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} components/version_info
+
+      - name: Compiling (ui/base)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} ui/base
+
+      - name: Compiling (chrome/browser:resources)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome/browser:resources
+
+      - name: Compiling (chrome/browser/ui)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome/browser/ui
+
+      - name: Compiling (chrome/browser)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome/browser
+
+      - name: Uploading cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Compiling (chrome/common)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome/common
+
+      - name: Compiling (chrome/renderer)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome/renderer
+
+      - name: Compiling (extensions)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} extensions
+
+      - name: Compiling (services)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} services
+
+      - name: Compiling (v8)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} v8
+
+      - name: Checking available disk space before final stage
+        run: df -h
+
+      - name: Reclaiming disk space (clear ccache)
+        run: sudo rm -rf /mnt/cache/*
+
+      - name: Checking disk space and memory
         run: |
-          ninja -C ./secondary_disk/out/android_${{ matrix.platform }} base
-          ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome_public_apk
+          df -h
+          free -m
+          ps auxww
 
-      - name: Uploading APK to Artifacts
+      - name: Compiling (final stage — chrome_public_apk)
+        run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} chrome_public_apk
+
+      - name: Uploading final cache snapshot
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+
+      - name: Generating native symbols mapping
+        run: |
+          mkdir -p ./secondary_disk/out/lnx64
+          cp -v ../.cipd/tools/* ./secondary_disk/out/lnx64/
+          chmod +x ./secondary_disk/out/lnx64/dump_syms
+          python3 components/crash/content/tools/generate_breakpad_symbols.py \
+            --build-dir=./secondary_disk/out/lnx64 \
+            --symbols-dir=/tmp/extracted_symbols/ \
+            --binary=./secondary_disk/out/android_${{ matrix.platform }}/lib.unstripped/libchrome.so \
+            --clear --verbose
+          tar -czvf \
+            ./secondary_disk/out/android_${{ matrix.platform }}/apks/ChromePublic.native.mapping.tar.gz \
+            /tmp/extracted_symbols
+          echo "Symbol compression complete."
+
+      # Fix: updated from upload-artifact@v1 → v4
+      - name: Uploading APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ matrix.platform }}
           path: ./secondary_disk/out/android_${{ matrix.platform }}/apks/
 
+      - name: Listing mapping files
+        run: find ./secondary_disk/out/ -name '*.mapping'
+
+  # ── Sign & publish ──────────────────────────────────────────────────────────
   sign_and_upload:
     runs-on: ubuntu-latest
     needs: build
-    permissions: { contents: write }
+
     steps:
-      - name: Downloading artifact
+      - name: Installing rclone
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: curl https://rclone.org/install.sh | sudo bash -s beta
+
+      - name: Creating rclone config (APK upload)
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: |
+          mkdir -p $HOME/.config/rclone/
+          cat > $HOME/.config/rclone/rclone.conf << EOF
+          [sync]
+          type = sftp
+          host = ${{ secrets.STORAGE_HOST }}
+          user = storage
+          key_pem = ${{ secrets.STORAGE_KEY }}
+          EOF
+
+      # Fix: updated from download-artifact@v1 → v4 (path= is now required)
+      - name: Downloading artifact (arm)
         uses: actions/download-artifact@v4
-        with: { name: apk-arm64, path: apk-arm64 }
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_id }}
-          name: "Kiwi arm64 - Gen ${{ github.run_id }}"
+          name: apk-arm
+          path: apk-arm
+
+      - name: Downloading artifact (arm64)
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-arm64
+          path: apk-arm64
+
+      - name: Downloading artifact (x86)
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-x86
+          path: apk-x86
+
+      - name: Downloading artifact (x64)
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-x64
+          path: apk-x64
+
+      # Fix: replaced deprecated actions/create-release + actions/upload-release-asset
+      #      with softprops/action-gh-release@v2 (creates release + uploads in one step)
+      - name: Creating GitHub release and uploading all assets
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        with:
+          tag_name: ${{ github.run_id }}
+          name: Generation ${{ github.run_id }}
+          draft: false
           prerelease: true
-          body: "Build otomatis Kiwi Browser arm64 (Public Archive)."
+          body: |
+            Important: This is Kiwi Browser Classic.
+            Kiwi Browser Classic installs as a separate application (com.kiwibrowser.browser.classic).
+
+            The new updates of Kiwi Browser have moved to a new repository.
+
+            If you want the latest release of Kiwi Browser, please visit:
+            https://github.com/kiwibrowser/src.next/releases
           files: |
-            ./apk-arm64/*.apk
-            ./apk-arm64/*.mapping
+            apk-arm/ChromePublic.apk
+            apk-arm/ChromePublic.apk.mapping
+            apk-arm/ChromePublic.native.mapping.tar.gz
+            apk-arm64/ChromePublic.apk
+            apk-arm64/ChromePublic.apk.mapping
+            apk-arm64/ChromePublic.native.mapping.tar.gz
+            apk-x86/ChromePublic.apk
+            apk-x86/ChromePublic.apk.mapping
+            apk-x86/ChromePublic.native.mapping.tar.gz
+            apk-x64/ChromePublic.apk
+            apk-x64/ChromePublic.apk.mapping
+            apk-x64/ChromePublic.native.mapping.tar.gz
