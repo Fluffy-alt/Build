@@ -161,7 +161,6 @@ jobs:
         run: ln -s /mnt/cache $HOME/
 
       - name: Downloading ccache from remote storage
-        if: ${{ secrets.STORAGE_HOST != '' }}
         continue-on-error: true
         run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-ccache-${{ matrix.platform }} $HOME/cache
 
