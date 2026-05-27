@@ -77,6 +77,7 @@ jobs:
       - name: Installing Chromium build dependencies
         run: |
           sudo bash install-build-deps.sh --no-chromeos-fonts
+          2to3 -w build/linux/sysroot_scripts/install-sysroot.py
           build/linux/sysroot_scripts/install-sysroot.py --arch=i386
           build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
 
