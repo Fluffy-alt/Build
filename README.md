@@ -1,6 +1,6 @@
-# [Your Browser Name]
+# Test Projects 
 
-Welcome to the official repository for **[Your Browser Name]**, a fast, lightweight, and feature-rich web browser for Android. This project is a customized fork of the open-source Kiwi Browser.
+Welcome to the official repository for **Test Projects**, a fast, lightweight, and feature-rich web browser for Android. This project is a customized fork of the open-source Kiwi Browser.
 
 Our goal is to stabilize the base build first, after which we plan to introduce unique features, UI enhancements, and a complete rebranding.
 
