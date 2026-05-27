@@ -83,10 +83,14 @@ jobs:
           2to3 -w build/linux/sysroot_scripts/install-sysroot.py
           build/linux/sysroot_scripts/install-sysroot.py --arch=i386
           build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
-          find build/ -name "*.py" -exec \
-          sed -i 's/^\(\s*\)print \([^(].*\)$/\1print(\2)/' {} +
-          find third_party/ -name "*.py" -exec \
-          sed -i 's/^\(\s*\)print \([^(].*\)$/\1print(\2)/' {} +
+   
+      - name: Converting Python 2 print statements to Python 3
+        run: |
+         continue-on-error: find build/ -name "*.py" -exec \
+         find build/ -name "*.py" -exec \
+         sed -i 's/^\(\s*\)print \([^(].*\)$/\1print(\2)/' {} +
+         find third_party/ -name "*.py" -exec \
+         sed -i 's/^\(\s*\)print \([^(].*\)$/\1print(\2)/' {} +
 
       - name: Creating output folder
         run: mkdir -p secondary_disk/out/android_${{ matrix.platform }}
