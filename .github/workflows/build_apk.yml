@@ -149,6 +149,7 @@ jobs:
           host = ${{ secrets.STORAGE_HOST }}
           user = storage
           key_pem = ${{ secrets.STORAGE_KEY }}
+          key_use_agent = false
           EOF
 
       - name: Creating cache folder on SSD
@@ -160,6 +161,8 @@ jobs:
         run: ln -s /mnt/cache $HOME/
 
       - name: Downloading ccache from remote storage
+        if: ${{ secrets.STORAGE_HOST != '' }}
+        continue-on-error: true
         run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-ccache-${{ matrix.platform }} $HOME/cache
 
       - name: Checking available disk space after cache download
@@ -219,8 +222,8 @@ jobs:
         run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} base
 
       - name: Uploading cache snapshot
-        if: ${{ github.repository_owner == 'kiwibrowser' }}
-        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}/
+        if: ${{ github.repository_owner == 'kiwibrowser'  }}
+        run: rclone copy --fast-list --transfers=32 $HOME/cache/ sync:kiwibrowser-ccache-${{ matrix.platform }}
 
       - name: Compiling (content/public/common)
         run: ninja -C ./secondary_disk/out/android_${{ matrix.platform }} content/public/common
