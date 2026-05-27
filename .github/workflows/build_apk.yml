@@ -1,5 +1,5 @@
 # Build APKs for Kiwi Browser
-name: build apk
+name: build apk(I hope can)
 
 on:
   workflow_dispatch:
