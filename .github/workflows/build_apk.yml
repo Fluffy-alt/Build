@@ -59,6 +59,8 @@ jobs:
           ln -s $GITHUB_WORKSPACE/./secondary_disk/.cipd ..
           cp ../.cipd/.gclient ..
           cp ../.cipd/.gclient_entries ..
+          cp ../.cipd/.gclient .
+          cp ../.cipd/.gclient_entries .
 
       - name: Installing rclone
         run: curl https://rclone.org/install.sh | sudo bash
